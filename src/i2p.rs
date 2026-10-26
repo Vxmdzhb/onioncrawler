@@ -1,29 +1,26 @@
-//! I2P HTTP-proxy helpers for reaching `.i2p` eepsites via a local I2P router's
-//! HTTP proxy (default `127.0.0.1:4444`).
+//! I2P HTTP-proxy helpers for reaching `.i2p` eepsites through a local I2P
+//! router's HTTP proxy (default `127.0.0.1:4444`).
 //!
-//! Two transport shapes, analogous to the SOCKS module:
-//! * plain-http eepsite → send an **absolute-form** request line to the proxy
-//!   (`GET http://site.i2p/path HTTP/1.1`); the proxy forwards it into I2P.
-//! * https eepsite → issue an HTTP `CONNECT site.i2p:port` to the proxy, then run
-//!   TLS over the returned tunnel (origin-form).
+//! Two shapes, like the SOCKS module:
+//! * plain-http eepsite: send an **absolute-form** request line to the proxy
+//!   (`GET http://site.i2p/path HTTP/1.1`), which forwards it into I2P;
+//! * https eepsite: send `CONNECT site.i2p:port` to the proxy, then run TLS
+//!   over the tunnel (origin-form).
 //!
-//! The encoders are pure functions (unit-testable without a socket, cross-checked
-//! in `tests/xcheck_i2p.rs`). The eepsite name is sent to the proxy verbatim — we
-//! NEVER resolve `.i2p` locally, which is both how I2P works and an anti-leak
-//! requirement (the address never becomes an IP on this host).
+//! The encoders are pure functions (testable without a socket, cross-checked
+//! in `tests/xcheck_i2p.rs`). The eepsite name goes to the proxy as is: `.i2p`
+//! is never resolved locally, which is how I2P works and keeps the address
+//! from ever becoming an IP on this host.
 //!
 //! # The gate
 //!
-//! "We never resolve it here" is only half of the anti-leak property: the other
-//! half is that the *proxy* must not resolve it either. An I2P router's HTTP
-//! proxy forwards a non-`.i2p` host to its configured **outproxy**, which does a
-//! clearnet DNS lookup and opens a clearnet TCP connection — so
-//! `build_http_connect("tracker.example.com", 443)` would have been a leak
-//! authored by this module, not by I2P. Both encoders below therefore refuse any
-//! host that is not a valid eepsite ([`crate::onion::is_i2p_host`]), and
-//! [`build_proxy_get_target_checked`] takes a validated [`I2pHost`] so the
-//! refusal happens at the type level, the way [`crate::fetcher::Fetcher::open`]
-//! takes an `&OnionHost`.
+//! Not resolving it here is only half of it: the *proxy* mustn't resolve it
+//! either. An I2P router's HTTP proxy sends a non-`.i2p` host to its
+//! **outproxy**, which does a clearnet DNS lookup and a clearnet connection.
+//! So both encoders refuse any host that isn't a valid eepsite
+//! ([`crate::onion::is_i2p_host`]), and [`build_proxy_get_target_checked`]
+//! takes a validated [`I2pHost`], making the refusal a type, the way
+//! [`crate::fetcher::Fetcher::open`] takes an `&OnionHost`.
 
 use std::fmt;
 

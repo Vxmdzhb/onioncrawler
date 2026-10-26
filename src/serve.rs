@@ -1,44 +1,42 @@
-//! The no-JS HTTP serving layer — the read side of the onioncrawler exposed over
-//! loopback, ported from the Python `onioncrawler.search` server.
+//! The no-JS HTTP serving layer: the read side of onioncrawler over loopback,
+//! ported from the Python `onioncrawler.search` server.
 //!
-//! Structured like `torrentds`'s search server: pure renderers + a pure
+//! Built like `torrentds`'s search server: pure renderers and a pure
 //! [`SearchServer::route`] (it locks the shared `Arc<Mutex<Store>>`
-//! *synchronously* — no `.await` while the lock is held), with only the async
-//! accept loop ([`serve`]) and per-connection HTTP parsing ([`handle_conn`])
-//! behind the `net` feature. So the entire routing + HTML/JSON/XML rendering is
-//! testable in the pure (zero-dep) tier without a socket, and a loopback
-//! round-trip test exercises the async glue.
+//! synchronously, never across an `.await`), with only the async accept loop
+//! ([`serve`]) and per-connection HTTP parsing ([`handle_conn`]) behind the
+//! `net` feature. All routing and HTML/JSON/XML rendering can be tested
+//! without a socket, and a loopback round-trip test covers the async glue.
 //!
-//! GET endpoints: `/` and `/search` (HTML), `/api/search` (JSON), `/find` +
-//! `/api/find` (entity pivot), `/stats` (HTML) + `/api/stats` (JSON),
+//! GET endpoints: `/` and `/search` (HTML), `/api/search` (JSON), `/find` and
+//! `/api/find` (entity pivot), `/stats` (HTML) and `/api/stats` (JSON),
 //! `/cached?url=` (offline page snapshot), `/health` (JSON), `/metrics`
-//! (Prometheus text), `/robots.txt`, `/opensearch.xml`. POST endpoints (gated by
+//! (Prometheus text), `/robots.txt`, `/opensearch.xml`. POST endpoints (behind
 //! a `Bearer` admin token, with an optional public-submit path): `/add`
-//! (submit onion seeds through the abuse filter + `add_seed` caps), `/purge`
-//! (block a host + delete its pages), `/recrawl` (requeue due pages). The crawl
-//! orchestration loop is the remaining increment.
+//! (submit onion seeds through the abuse filter and `add_seed`'s caps),
+//! `/purge` (block a host and delete its pages), `/recrawl` (requeue due
+//! pages).
 //!
-//! # The write endpoints are durable
+//! # Writes are durable
 //!
-//! `/purge`, `/add` and `/recrawl` mutate the shared [`Store`] **and commit it**
-//! to [`ServeConfig::store_path`] through `crawlcore::atomicfile::write_atomic`,
-//! under the same lock as the mutation. Each answers with `"persisted"` saying
+//! `/purge`, `/add` and `/recrawl` change the shared [`Store`] **and save it**
+//! to [`ServeConfig::store_path`] with `crawlcore::atomicfile::write_atomic`,
+//! under the same lock as the change. Each answers with `"persisted"` saying
 //! whether the change reached disk, and a failed write is a `500`. Leaving
-//! `store_path` unset is a supported in-memory deployment, and then
-//! `"persisted":false` says exactly that.
+//! `store_path` unset is a supported in-memory setup, and then
+//! `"persisted":false` says so.
 //!
 //! # What bounds a hostile client
 //!
-//! * **Rate limits** — [`SearchServer::route_limited`] charges every request to
+//! * **Rate limits.** [`SearchServer::route_limited`] charges every request to
 //!   a per-client [`TokenBucket`] before it reaches the store, in two classes
-//!   (reads, writes) with [`RateLimits`] configurable per endpoint class;
-//!   `/health` and `/metrics` are exempt. This is on the network path
-//!   ([`serve`]); the pure [`SearchServer::route`] deliberately has no limiter,
-//!   as it has no client to key on.
-//! * **A total per-request deadline** — [`ServeLimits::request_timeout`] covers
-//!   the head read, the route and the response write together, so a byte-at-a-
-//!   time client cannot hold a task and a file descriptor open indefinitely.
-//! * **A header cap and a body budget** — see `handle_conn_from`.
+//!   (reads, writes) with [`RateLimits`] configurable per class; `/health` and
+//!   `/metrics` are exempt. This is on the network path ([`serve`]); the pure
+//!   [`SearchServer::route`] has no limiter, since it has no client to key on.
+//! * **A total per-request deadline.** [`ServeLimits::request_timeout`] covers
+//!   reading the head, routing and writing the response together, so a client
+//!   sending a byte at a time can't hold a task and a file descriptor forever.
+//! * **A header cap and a body budget**: see `handle_conn_from`.
 
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -81,20 +79,15 @@ pub struct ServeConfig {
     pub rate_limits: RateLimits,
 }
 
-/// The trap budgets a public (unauthenticated) `POST /add` submission is admitted
-/// under — the values [`ServeConfig::default`] installs in
-/// [`ServeConfig::submit_caps`].
+/// The trap budgets a public (unauthenticated) `POST /add` is admitted under:
+/// the values [`ServeConfig::default`] puts in [`ServeConfig::submit_caps`].
 ///
-/// These are *not* cosmetic. `submit_caps` used to default to `Caps::default()`,
-/// i.e. every field `None`, i.e. **no cap at all** on the endpoint the module doc
-/// calls "capped". With `allow_public_submit` on and no caps, one POST carrying
-/// `max_public_add_urls` (100) distinct v3 onion URLs adds 100 frontier rows and
-/// up to 100 host rows; repeated at the write rate limit (1/s) that is 360 000
-/// rows an hour, each holding a ~70-byte URL plus its template and skeleton keys,
-/// growing the frontier — and every snapshot written from it — until the process
-/// is OOM-killed. Nothing else in the path bounds it: the abuse filter only
-/// blocks *known* hosts, and a v3 onion address is 2^256 addresses' worth of
-/// distinct-looking strings to invent.
+/// They matter. Without caps, with `allow_public_submit` on, each POST can add
+/// `max_public_add_urls` (100) new onion URLs to the frontier; at the write
+/// rate limit (1/s) that's 360 000 rows an hour, growing the frontier and
+/// every snapshot until the process runs out of memory. Nothing else stops it:
+/// the abuse filter only blocks *known* hosts, and v3 onion addresses are
+/// effectively unlimited.
 pub mod submit_caps {
     /// Global frontier ceiling for public submissions (checked against the
     /// `urls_enqueued` counter). Public intake stops at 100k URLs; the crawler's
@@ -458,9 +451,9 @@ struct Filters {
     until_s: String,
     since: Option<f64>,
     until: Option<f64>,
-    /// The explicit `?limit=` (a Rust-side parameter the Python has no analogue
-    /// for — its page size is server config). Carried through every pager and
-    /// facet link so paging does not silently revert to the default.
+    /// The explicit `?limit=` (a parameter the Python version doesn't have; its
+    /// page size is server config). Carried through every pager and facet link so
+    /// paging keeps the chosen size.
     limit: Option<usize>,
 }
 
@@ -1994,8 +1987,8 @@ placeholder='search indexed .onion pages' autofocus>\
         let want_next = "<a href='/search?q=widget&page=3&lang=en&since=1970-01-01&until=2038-01-01&limit=1'>Next »</a>";
         assert!(b.contains(want_prev), "{b}");
         assert!(b.contains(want_next), "{b}");
-        // and the window really is the requested size (before the fix, `limit`
-        // was dropped from the href and page 2 silently reverted to 10)
+        // and the window really is the requested size (`limit` is kept in the href,
+        // so page 2 doesn't fall back to 10)
         assert_eq!(b.matches("<div class=result>").count(), 1);
         assert!(
             b.contains("<p class=muted>Results 2-2 of 4 match(es)</p>"),
@@ -2066,8 +2059,8 @@ placeholder='search indexed .onion pages' autofocus>\
             body(&srv.route("GET", "/search?q=widget&page=999999999", "", None)),
             at_cap
         );
-        // the offset it produces is bounded (the old 1M cap allowed 10M), and
-        // the window line is the reference's `min(offset + per, total)`
+        // the offset it produces is bounded, and the window line is the reference's
+        // `min(offset + per, total)`
         assert!(
             at_cap.contains("<p class=muted>Results 999991-1 of 1 match(es)</p>"),
             "{at_cap}"
@@ -2489,10 +2482,10 @@ placeholder='search indexed .onion pages' autofocus>\
         };
         let srv = SearchServer::new(Arc::new(Mutex::new(Store::new())), "").with_config(cfg);
         let host = "q".repeat(56) + ".onion";
-        // One unauthenticated POST of `/0`, `/1`, … — the id-parameterized page
-        // farm the skeleton cap exists for (every one of these collapses to the
-        // skeleton `<host>/#`). With the old all-`None` defaults every URL was
-        // accepted, so a public client could grow the frontier without limit.
+        // One unauthenticated POST of `/0`, `/1`, …: the id-parameterised page farm
+        // the skeleton cap exists for (all of these collapse to the skeleton
+        // `<host>/#`). Without caps every URL would be accepted, and a public client
+        // could grow the frontier without limit.
         let n = submit_caps::MAX_URLS_PER_SKELETON as usize;
         let urls: Vec<String> = (0..n + 10).map(|i| format!("http://{host}/{i}")).collect();
         let r = srv.route("POST", "/add", &format!("urls={}", urls.join("%0A")), None);
@@ -2676,27 +2669,18 @@ placeholder='search indexed .onion pages' autofocus>\
         assert!(text.contains("http://a.onion/1"));
     }
 
-    /// A client that dribbles one byte per interval and never finishes the head.
+    /// A client that sends one byte per interval and never finishes the head.
     ///
-    /// Before the deadline there was no timeout anywhere in `handle_conn`: the
-    /// head-read loop simply awaited the next byte, so this connection lived for
-    /// as long as the peer cared to keep it — one task, one socket and one file
-    /// descriptor each, with nothing in the code that would ever reap them. A
-    /// per-read timeout would not have helped either, since every dribbled byte
-    /// resets it; only a deadline over the whole round trip ends this.
+    /// Only a deadline over the whole round trip ends this: a per-read timeout
+    /// would be reset by every byte.
     ///
-    /// The durations are scaled down from production, but only so far. The
-    /// invariant is `dribble total > request_timeout >> a normal round trip`,
-    /// and the same `request_timeout` also governs the well-behaved request at
-    /// the end of this test — head read, route, search and write, ~2 ms on an
-    /// idle box and tens of milliseconds on a contended one. At the 300 ms this
-    /// used to run with, the second half of the invariant was inside the noise:
-    /// a loaded 2-core runner can stall a task for longer than that, the server
-    /// would drop a perfectly good request, and the final assertion would fail
-    /// with no bug behind it. 4 s of dribble against a 2 s deadline keeps both
-    /// halves — the slowloris is still cut off by the total deadline, and the
-    /// normal request keeps a ~40x margin against its loaded cost — for ~3 s
-    /// more wall clock, which is the cheaper side of the trade.
+    /// The durations are scaled down from production, but not too far. The
+    /// invariant is `dribble total > request_timeout >> a normal round trip`, and
+    /// the same `request_timeout` also applies to the normal request at the end of
+    /// this test (~2 ms idle, tens of milliseconds on a busy runner). 4 s of
+    /// dribble against a 2 s deadline keeps both halves: the slow client is still
+    /// cut off, and the normal request has a ~40x margin even on a loaded runner,
+    /// at the cost of ~3 s of wall clock.
     #[cfg(feature = "net")]
     #[tokio::test]
     async fn a_slowloris_client_is_cut_off_by_the_total_deadline() {

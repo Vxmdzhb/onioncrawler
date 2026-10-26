@@ -1,28 +1,26 @@
-//! onioncrawler — the darknet (Tor `.onion`, optional I2P `.i2p`) crawler of the
-//! astrx-suite Rust rewrite.
+//! onioncrawler: the darknet crawler (Tor `.onion`, optionally I2P `.i2p`) of
+//! the astrx suite.
 //!
-//! Ported one module at a time from the retiring Python engine under
-//! `legacy-python/onioncrawler/`, with the Python tests carried over as the
-//! executable spec and every ported module cross-checked byte-identical to the
-//! reference (see `tests/xcheck_*.rs`).
+//! A port of the Python engine, with its tests carried over as the spec and
+//! every ported module cross-checked byte for byte against it (see
+//! `tests/xcheck_*.rs`).
 //!
-//! # The crown invariant, as a type
+//! # The key invariant, as a type
 //!
-//! This is a service that opens sockets to anonymous, hostile hidden services
-//! behind Tor. The one invariant that must never break is that a Tor crawl can
-//! never touch a clearnet / localhost / IP-literal host — a leak would
-//! deanonymise the operator. In the Python engine that gate is a runtime call
-//! (`require_onion`) that every socket path must remember to make. Here it is a
-//! **type**: [`onion::OnionHost`] is constructible only through a validating
-//! parser, and the (forthcoming) net-tier fetcher takes an `&OnionHost` rather
-//! than a `&str`, so handing it a clearnet host is a *compile* error, not a
-//! runtime check that can be forgotten.
+//! This service opens sockets to anonymous, possibly hostile hidden services
+//! over Tor. The one thing that must never happen is a Tor crawl touching a
+//! clearnet, localhost or IP-literal host: that would deanonymise the
+//! operator. In the Python engine the gate is a runtime call (`require_onion`)
+//! every socket path has to remember. Here it's a **type**:
+//! [`onion::OnionHost`] can only be built by a validating parser, and the
+//! fetcher takes an `&OnionHost` rather than a `&str`, so passing it a
+//! clearnet host is a *compile* error.
 //!
 //! # Feature tiers
 //!
-//! Mirrors `torrentds`: the pure modules below build under the default (empty)
-//! feature set with zero third-party dependencies; live networking is opt-in
-//! behind `net`/`rand`.
+//! Like `torrentds`: the pure modules build with the default (empty) feature
+//! set and no third-party dependencies; live networking is opt-in behind
+//! `net`/`rand`.
 #![forbid(unsafe_code)]
 
 pub mod abuse;

@@ -1,22 +1,21 @@
 //! A small token-bucket rate limiter, keyed by client (IP).
 //!
-//! Used to protect the public search/API endpoints. The clock is injected (each
-//! [`TokenBucket::allow`] call takes the current monotonic time) so refill
-//! behaviour is deterministically unit-testable without sleeping.
+//! Protects the public search and API endpoints. The clock is passed in (each
+//! [`TokenBucket::allow`] call takes the current monotonic time), so refills
+//! can be tested deterministically without sleeping.
 //!
-//! The per-key table is bounded by `max_keys` with LRU eviction: on overflow the
-//! least-recently-used key is dropped, NOT the whole table — clearing everything
-//! would hand every active client a fresh full burst at once.
+//! The per-key table is bounded by `max_keys` with LRU eviction: on overflow
+//! the least recently used key goes, not the whole table (clearing everything
+//! would give every active client a fresh full burst at once).
 //!
-//! Deployment note: behind a Tor onion service every request arrives from
-//! `127.0.0.1`, so the limiter collapses to a single shared bucket (there is no
-//! per-client identity to key on). The LRU bookkeeping is therefore O(1) in
-//! practice; the `Vec`-based order below is only exercised under a clearnet
-//! deployment with many distinct peers.
+//! Behind a Tor onion service every request comes from `127.0.0.1`, so the
+//! limiter becomes a single shared bucket (there's no per-client identity).
+//! The LRU bookkeeping is then O(1); the `Vec`-based order below only matters
+//! on a clearnet deployment with many distinct peers.
 //!
-//! Ported from the Python `ratelimit.py`; cross-checked in
-//! `tests/xcheck_ratelimit.rs`. Pure (no async, no deps): the bucket math is
-//! stdlib-only; a caller that shares it across tasks wraps it in a `Mutex`.
+//! A port of the Python `ratelimit.py`, cross-checked in
+//! `tests/xcheck_ratelimit.rs`. Pure (no async, no dependencies); a caller
+//! sharing it across tasks wraps it in a `Mutex`.
 
 use std::collections::HashMap;
 

@@ -38,7 +38,7 @@ pub const USER_AGENT: &str =
 /// The outcome of a fetch (after following redirects).
 #[derive(Debug, Clone)]
 pub struct FetchResult {
-    /// The originally-requested URL.
+    /// The URL that was originally requested.
     pub url: String,
     /// The final URL after redirects (canonicalized).
     pub final_url: String,

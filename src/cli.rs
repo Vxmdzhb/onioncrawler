@@ -1,52 +1,51 @@
-//! The `onioncrawler` command-line entrypoint — a dependency-free port of the
-//! Python CLI (`legacy-python/onioncrawler/onioncrawler/__main__.py`,
-//! `python3 -m onioncrawler`).
+//! The `onioncrawler` command-line entrypoint, a dependency-free port of the
+//! Python CLI (`python3 -m onioncrawler`).
 //!
 //! Nine subcommands drive the library. `crawl` seeds a [`Crawler`] over the
 //! darknet [`Fetcher`], runs it, and [`Store::snapshot`]s the result to `--db`;
 //! `search` [`Store::restore`]s that snapshot and serves the no-JS
 //! [`SearchServer`]; `submit` and `reseed` admit seed URLs through the darknet
-//! gate + abuse filter; `stats`, `authority`, `cluster`, `recrawl` and `backup`
-//! are offline maintenance over the same snapshot.
+//! gate and the abuse filter; `stats`, `authority`, `cluster`, `recrawl` and
+//! `backup` are offline maintenance on the same snapshot.
 //!
-//! Unlike the Python engine there is no SQLite file: the whole persistence unit
-//! is a versioned binary snapshot blob, so `--db` is that blob's path
-//! ([`Store::snapshot`] / [`Store::restore`]) and every mutating subcommand
-//! writes it back when it finishes.
+//! There is no SQLite file: the whole store is one versioned binary snapshot,
+//! so `--db` is that file's path ([`Store::snapshot`] / [`Store::restore`]),
+//! and every subcommand that changes something writes it back when it
+//! finishes.
 //!
-//! The whole binary is gated behind the crate's `net` feature (see the `[[bin]]`
-//! `required-features` in `Cargo.toml`), so the default `onioncrawler` build
-//! stays a pure, zero-dependency library. Argument parsing is hand-rolled — no
-//! `clap`, no third-party crate — to keep that guarantee. Exit codes match
-//! argparse: `0` success (or `--help`/`--version`), `1` a runtime failure, `2` a
-//! usage error (including `submit`/`reseed` with no URLs, as in Python).
+//! The binary needs the crate's `net` feature (`required-features` on the
+//! `[[bin]]` in `Cargo.toml`), so the default build stays a pure library with
+//! no dependencies. Argument parsing is hand-written, no `clap`. Exit codes
+//! match argparse: `0` success (or `--help`/`--version`), `1` a runtime
+//! failure, `2` a usage error (including `submit`/`reseed` with no URLs, as in
+//! Python).
 //!
-//! # Documented divergences from the Python CLI
+//! # Differences from the Python CLI
 //!
-//! * **`--fetcher i2p`** is not accepted: the Rust [`Fetcher`] has a Tor SOCKS5
-//!   transport and a loopback test transport only (the `i2p` module currently
-//!   provides the proxy *encoders*, not a transport). `--enable-i2p` still admits
-//!   `.i2p` hosts to the frontier / submissions, as in Python.
-//! * **`crawl --tor-pool`** (torfleet: spreading a crawl across N Tor daemons),
-//!   **`--media-max-bytes`** (media-hash re-fetch) and **`--max-pages-this-run`**
-//!   are not ported — the Rust fetcher takes a single proxy, and the crawl loop
-//!   has neither the media re-fetch nor a per-run page counter (only the
-//!   cumulative `max_total_pages`).
-//! * **`crawl --seed-list` / `--reseed-interval`** are not ported: the scheduled
-//!   re-seed daemon is not in the Rust crawl loop. Run `onioncrawler reseed
-//!   --seed-list FILE` before (or beside) a crawl instead.
-//! * **`search --admin-user` / `--admin-pass`** (HTTP Basic auth) are not ported:
-//!   the Rust serve layer authenticates write endpoints with a `Bearer` token
-//!   (`--admin-token`) only. **`--metrics-token`**, **`--no-rate-limit`** and
-//!   **`--authority-weight`** are likewise not ported — the Rust server has no
-//!   metrics gate or rate limiter, and blends host authority per request via the
-//!   `?authority=` query parameter rather than a server-wide default.
-//! * **Shutdown is not signal-driven.** `tokio` is built here without its
-//!   `signal` feature (it would add crates to the audited dependency closure), so
-//!   there is no SIGINT handler; `crawl` is a batch job that persists when the
-//!   frontier drains, and `search` is read-only.
-//! * `backup`'s default destination timestamp is UTC (Python uses local time),
-//!   and an existing destination is refused rather than overwritten.
+//! * **`--fetcher i2p`** isn't accepted: the [`Fetcher`] has a Tor SOCKS5
+//!   transport and a loopback test transport only (the `i2p` module provides
+//!   the proxy *encoders*, not a transport). `--enable-i2p` still admits
+//!   `.i2p` hosts to the frontier and submissions, as in Python.
+//! * **`crawl --tor-pool`** (spreading a crawl over N Tor daemons),
+//!   **`--media-max-bytes`** (media-hash re-fetch) and
+//!   **`--max-pages-this-run`** aren't ported: the fetcher takes one proxy,
+//!   and the crawl loop has no media re-fetch and no per-run page counter
+//!   (only the cumulative `max_total_pages`).
+//! * **`crawl --seed-list` / `--reseed-interval`** aren't ported: there's no
+//!   scheduled re-seed in the crawl loop. Run `onioncrawler reseed
+//!   --seed-list FILE` before or beside a crawl instead.
+//! * **`search --admin-user` / `--admin-pass`** (HTTP Basic) aren't ported:
+//!   write endpoints take a `Bearer` token (`--admin-token`) only.
+//!   **`--metrics-token`**, **`--no-rate-limit`** and **`--authority-weight`**
+//!   aren't ported either: there's no metrics gate, rate limits are configured
+//!   per endpoint class, and host authority is blended per request with the
+//!   `?authority=` query parameter.
+//! * **No signal handling.** tokio is built without its `signal` feature (it
+//!   would add crates to the audited closure), so there's no SIGINT handler:
+//!   `crawl` is a batch job that saves when the frontier drains, and `search`
+//!   is read-only.
+//! * `backup`'s default file name uses UTC (Python uses local time), and an
+//!   existing destination is refused rather than overwritten.
 use std::collections::{HashMap, HashSet};
 use std::io::ErrorKind;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -248,11 +247,9 @@ enum CliError {
 /// and exit codes — the point of routing them through one function rather than
 /// two copies of the parser that drift apart the first time a flag is added.
 pub fn run(args: impl Iterator<Item = String>) -> ExitCode {
-    // `--log-format` is handled before the subcommand parser so it works on
-    // every subcommand of every engine with one call site each, rather than
-    // being a flag an operator has to remember which subcommands happen to
-    // accept. It is removed from `argv`, so the parser below sees exactly the
-    // command line it saw before this flag existed.
+    // `--log-format` is handled before the subcommand parser, so it works on
+    // every subcommand, and it is removed from `argv`, so the parser below never
+    // sees it.
     let (log_format, argv) = match crawlcore::logfmt::take_format_flag(args.collect()) {
         Ok(v) => v,
         Err(msg) => {
@@ -973,10 +970,10 @@ fn read_seeds(path: Option<&str>, extra: &[String]) -> Result<Vec<String>, Strin
     }
 }
 
-/// The Python `seedlist.load_seed_list`: the curated seed file read under the
-/// same bounds as [`read_seeds`], then canonicalized (darknet-only, so no
-/// clearnet line can leak) and deduped by canonical URL, order-preserving. A
-/// line that is not a valid darknet URL is dropped silently.
+/// The Python `seedlist.load_seed_list`: the curated seed file, read under the
+/// same bounds as [`read_seeds`], then canonicalised (darknet only, so no
+/// clearnet line gets through) and deduplicated by canonical URL, keeping the
+/// order. Lines that aren't valid darknet URLs are dropped.
 fn load_seed_list(path: &str, allow_v2: bool, allow_i2p: bool) -> Result<Vec<String>, String> {
     let fh = std::fs::File::open(path)
         .map_err(|e| format!("error: cannot read seed file {path}: {e}"))?;

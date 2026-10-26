@@ -738,10 +738,9 @@ mod tests {
         assert_eq!(urls(&r)[0], "hi");
     }
 
-    /// The scoring loop is O(terms × docs) under the serving layer's store lock,
-    /// and nothing between the request line and here bounded the term count: a
-    /// 64 KiB `?q=` carries ~8000 distinct words, each of which used to buy a
-    /// full sweep of the corpus for document frequency alone.
+    /// Scoring is O(terms × docs) under the serving layer's store lock, so the
+    /// number of terms has to be bounded: a 64 KiB `?q=` could otherwise carry
+    /// ~8000 distinct words, each costing a full sweep of the corpus.
     #[test]
     fn query_terms_are_capped() {
         let mut s = Store::new();

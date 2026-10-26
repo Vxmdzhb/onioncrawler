@@ -1,14 +1,10 @@
 //! This process's request counters, and the route → action classifier that
-//! bounds their label cardinality.
+//! keeps their label cardinality bounded.
 //!
-//! Before this existed, `onioncrawler`'s `/metrics` was the store's index gauges and nothing else. Nothing anywhere
-//! reported how many requests the server was handling, how long they took, or
-//! how many of them were failing — so "is it slow, or is it down?" had no answer
-//! short of reading the access log, which this engine did not have either.
-//!
-//! The counters live in [`crawlcore::metrics::Requests`], shared with the other
-//! engines so every engine's `/metrics` uses the same names with only the prefix
-//! changed.
+//! The counters live in [`crawlcore::metrics::Requests`], shared with the
+//! other engines, so every engine's `/metrics` uses the same names with only
+//! the prefix changed. Together with the store's index gauges they answer "is
+//! it slow, or is it down?".
 
 use std::sync::OnceLock;
 

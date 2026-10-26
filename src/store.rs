@@ -1,24 +1,20 @@
-//! The onioncrawler store — the resumable frontier + page index + host graph.
+//! The onioncrawler store: the resumable frontier, page index and host graph.
 //!
-//! A hand-rolled, **dependency-free** in-memory store persisted as a single
-//! self-describing snapshot blob (no database, no third-party crates), the same
-//! approach `torrentds`'s index store takes. It ports the domain of the Python
-//! `onioncrawler.storage.Storage` (a SQLite/FTS5 store) — the host state machine,
-//! the leased frontier with its trap-cap admission control, the page store with
-//! exact-content dedup, the entity verticals, the inter-onion link graph with
-//! offline PageRank, SimHash mirror clustering, and the liveness / dead-onion
-//! aging cycle — with the same return codes and invariants as the reference.
+//! A hand-written, **dependency-free** in-memory store saved as one
+//! self-describing snapshot (no database, no third-party crates), like
+//! `torrentds`'s index. It covers what the Python `onioncrawler.storage.Storage`
+//! (SQLite/FTS5) does: the host state machine, the leased frontier with its
+//! trap-cap admission control, the page store with exact-content dedup, the
+//! entity verticals, the onion-to-onion link graph with offline PageRank,
+//! SimHash mirror clustering, and the liveness / dead-onion ageing cycle, with
+//! the same return codes and invariants.
 //!
-//! The persistence unit is a versioned binary blob with native `i64`/`f64`
-//! fields (the store's timestamps are `REAL`), round-tripped by [`Store::snapshot`]
-//! / [`Store::restore`]. The deterministic analytics (PageRank authority, SimHash
-//! clustering) are cross-checked byte-for-byte against the Python reference in
-//! `tests/xcheck_store.rs`; the frontier / host / page semantics are covered by
-//! the unit tests below.
-//!
-//! Full-text search over the stored bodies (the SQLite FTS5 `bm25` path) is the
-//! next increment; every page's body text is retained here so it can be indexed
-//! without re-crawling.
+//! The snapshot is a versioned binary blob with native `i64`/`f64` fields,
+//! round-tripped by [`Store::snapshot`] / [`Store::restore`]. PageRank and
+//! SimHash clustering are cross-checked byte for byte against the Python
+//! version in `tests/xcheck_store.rs`; the frontier, host and page behaviour is
+//! covered by the unit tests below. Full-text search over the stored bodies is
+//! in `store/search.rs`.
 
 use std::collections::HashMap;
 
@@ -397,9 +393,9 @@ impl Store {
     }
 
     // ------------------------------------------------------------- frontier
-    /// Enqueue a seed. Revives a host previously demoted to `dead` (an operator
-    /// un-age); `trapped` / `blocked` are never revived. `force` (the trusted
-    /// path) bypasses the trap caps.
+    /// Enqueue a seed. Revives a host that was demoted to `dead` (an operator
+    /// un-ageing it); `trapped` and `blocked` hosts are never revived. `force`
+    /// (the trusted path) skips the trap caps.
     pub fn add_seed(
         &mut self,
         canon: &CanonicalUrl,

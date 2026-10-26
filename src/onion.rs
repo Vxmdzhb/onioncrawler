@@ -220,7 +220,7 @@ pub fn is_darknet_host(host: &str, allow_v2: bool, allow_i2p: bool) -> bool {
 /// Python `NotOnionError` / `NotDarknetError` messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Refusal {
-    /// Not a permitted `.onion` (the crown anti-leak refusal).
+    /// Not a permitted `.onion` (the anti-leak refusal).
     NotOnion,
     /// Not a valid `.i2p` eepsite.
     NotI2p,
@@ -261,7 +261,7 @@ impl fmt::Display for RefusedHost {
 
 impl std::error::Error for RefusedHost {}
 
-// --- the crown-jewel newtypes ----------------------------------------------
+// --- the validated newtypes ------------------------------------------------
 
 /// A validated, normalized Tor `.onion` host. **Constructible only** through
 /// [`OnionHost::parse`], which runs the same admission test the Python

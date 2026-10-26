@@ -198,10 +198,10 @@ impl AbuseFilter {
         self.media.contains(&h).then_some(h)
     }
 
-    /// The configured host blocklist entries (normalized), sorted. Symmetric
-    /// with [`keywords`](Self::keywords) / [`media_hashes`](Self::media_hashes),
-    /// so an operator front-end can tell an *empty* filter from a configured one
-    /// (the CLI refuses to crawl silently with no abuse filtering).
+    /// The configured host blocklist entries (normalised), sorted. Like
+    /// [`keywords`](Self::keywords) and [`media_hashes`](Self::media_hashes), so a
+    /// front end can tell an empty filter from a configured one (the CLI refuses
+    /// to crawl with no abuse filtering at all).
     #[must_use]
     pub fn hosts(&self) -> Vec<String> {
         let mut v: Vec<String> = self.hosts.iter().cloned().collect();

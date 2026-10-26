@@ -5,7 +5,7 @@
 //! query *keys*, values dropped — catches query-explosion / calendar bombs) and
 //! a **skeleton key** (host + path with numeric/hex/date-ish segments collapsed
 //! to `#` — a backstop for id-parameterized page farms). Only http/https darknet
-//! URLs survive; by default that means `.onion` only (the crown invariant),
+//! URLs survive; by default that means `.onion` only (the crate's key invariant),
 //! `allow_i2p` also admits `.i2p`. Clearnet never survives.
 //!
 //! Ported from the Python `canonical.py`; the `urllib`/`posixpath` behaviour it

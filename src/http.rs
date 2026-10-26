@@ -1,24 +1,20 @@
-//! This crate's view of the HTTP/1.1 client that runs over an already-connected
-//! (SOCKS-tunnelled) stream.
+//! This crate's side of the HTTP/1.1 client that runs over an already
+//! connected (SOCKS-tunnelled) stream.
 //!
-//! The wire layer itself is **not** here any more: request building, response-head
-//! and chunked-body parsing, and `Content-Encoding` decompression are shared with
-//! `websearch` in [`crawlcore::http`]. They were two independently-maintained
-//! copies of the same code until four framing / injection defects had each been
-//! found and fixed twice, once per copy — the chunked-size integer overflow, the
-//! CRLF injection through a truncated code point, the bare-LF header smuggling
-//! and the O(headers²) head parse. That module's doc names all four; this one
-//! re-exports the results at their historical paths, so `tests/xcheck_http.rs`
-//! and every call site keep working unchanged.
+//! The wire layer itself (request building, response head and chunked body
+//! parsing, `Content-Encoding` decompression) is shared with `websearch` in
+//! [`crawlcore::http`]; see that module for the bugs keeping one copy avoids.
+//! This module re-exports it at the paths this crate always used, so
+//! `tests/xcheck_http.rs` and every call site work unchanged.
 //!
-//! What is genuinely this crate's stays this crate's: the SOCKS5 transport
-//! ([`crate::socks`]), the `&OnionHost` anti-leak gate ([`crate::fetcher`]), the
-//! I2P proxy encoders ([`crate::i2p`]), and — below — the darknet
-//! `Content-Encoding` convention, which is the one thing about the wire layer the
-//! two engines genuinely disagreed on.
+//! What belongs to this crate stays here: the SOCKS5 transport
+//! ([`crate::socks`]), the `&OnionHost` anti-leak gate ([`crate::fetcher`]),
+//! the I2P proxy encoders ([`crate::i2p`]) and, below, the darknet
+//! `Content-Encoding` convention, the one thing the two engines handle
+//! differently.
 //!
-//! Redirects are handled one hop at a time by the caller (the fetcher), because a
-//! redirect to a new host needs a fresh tunnel.
+//! Redirects are followed one hop at a time by the caller (the fetcher),
+//! because a redirect to another host needs a new tunnel.
 
 /// The shared HTTP/1.1 wire layer, at this crate's historical paths. Cross-checked
 /// byte-identical to the Python `http_client.py` in `tests/xcheck_http.rs`.
@@ -37,22 +33,20 @@ pub use crawlcore::http::{
 pub use crawlcore::http::decompress_checked as decompress;
 
 /// Send one request on `stream` and read one response, under this crate's
-/// `Content-Encoding` convention (see [`decompress`]). The caller owns the stream
-/// lifecycle — in practice a SOCKS5 tunnel to a validated [`crate::onion::OnionHost`].
-/// Body reads are bounded by `max_bytes`; a larger body is truncated
-/// (`truncated == true`) rather than read unbounded.
+/// `Content-Encoding` convention (see [`decompress`]). The caller owns the
+/// stream, in practice a SOCKS5 tunnel to a validated
+/// [`crate::onion::OnionHost`]. Body reads are bounded by `max_bytes`; a larger
+/// body is truncated (`truncated == true`), never read without limit.
 ///
-/// The framing — the head cap, the chunked reader with its
-/// [`crawlcore::budget::Budget`]-bounded chunk sizes, the content-length and
-/// read-to-EOF paths, the keep-alive decision — is
-/// [`crawlcore::http::perform_request`], shared with `websearch`, so a framing fix
-/// lands once.
+/// The framing (head cap, chunked reader with
+/// [`crawlcore::budget::Budget`]-bounded chunks, content-length and
+/// read-to-EOF paths, keep-alive) is [`crawlcore::http::perform_request`],
+/// shared with `websearch`.
 ///
-/// This forwards the shared future rather than `await`ing it inside an `async fn`
-/// of its own: the fetch path is several async layers deep, a debug-build future
-/// nests its callee's state inline, and one extra `async fn` here was enough to
-/// abort a keep-alive test in the sibling crate with "thread has overflowed its
-/// stack".
+/// This returns the shared future instead of awaiting it inside an `async fn`
+/// of its own: the fetch path is several async layers deep, a debug build
+/// nests each callee's state inline, and one more layer was enough to
+/// overflow a test thread's stack.
 ///
 /// # Errors
 /// [`HttpError`] on I/O failure or a malformed response.
